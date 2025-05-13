@@ -150,9 +150,11 @@ uriage_data.isnull().any(axis=0)
 flg_is_null = uriage_data["item_price"].isnull() # 欠損値のある箇所を特定し、変数にどの行に欠損値が存在するか保持
 
 # .loc 関数は、条件を付与して、それに合致するデータを抽出する事ができる。
+"""
 for trg in list(uriage_data.loc[flg_is_null, "item_name"].unique()) : 
   price = uriage_data.loc[(~flg_is_null) & (uriage_data["item_name"] == trg), "item_price"].max()
   uriage_data.loc[(flg_is_null) & (uriage_data["item_name"] == trg), "item_price"] = price
+"""
 
 uriage_data.head()
 
@@ -160,7 +162,90 @@ uriage_data.head()
 uriage_data.isnull().any(axis=0)
 
 ### 各商品の金額が正しく補完されたか確認
+"""
 for trg in list(uriage_data["item_name"].sort_values().unique()) :
   print(trg + "の最大額:" + str(uriage_data.loc[uriage_data["item_name"] == trg]["item_price"].max()) +  
   "の最小額:" + str(uriage_data.loc[uriage_data["item_name"] == trg]["item_price"].min(skipna=False)))
+""" 
 
+##### 16: 顧客名の揺れを補正
+kokyaku_data["顧客名"].head()
+"""
+出力結果：：：
+顧客名
+0	須賀ひとみ
+1	岡田　 敏也
+2	芳賀 希
+3	荻野 愛
+4	栗田 憲一
+"""
+kokyaku_data["顧客名"] = kokyaku_data["顧客名"].str.replace(" ", "")
+kokyaku_data["顧客名"] = kokyaku_data["顧客名"].str.replace("　", "")
+kokyaku_data["顧客名"].head()
+"""
+出力結果：：：
+顧客名
+0	須賀ひとみ
+1	岡田敏也
+2	芳賀希
+3	荻野愛
+4	栗田憲一
+
+"""
+
+##### 17: 日付の揺れを補正
+flg_is_serial = kokyaku_data["登録日"].astype("str").str.isdigit()
+flg_is_serial.sum()
+
+# 補正処理
+fromSerial = pd.to_timedelta(kokyaku_data.loc[flg_is_serial, "登録日"].astype("float") - 2, unit="D") + pd.to_datetime('1900/1/1')
+fromSerial
+
+fromString = pd.to_datetime(kokyaku_data.loc[~flg_is_serial, "登録日"])
+fromString
+
+# データの結合
+kokyaku_data["登録日"] = pd.concat([fromSerial, fromString])
+kokyaku_data
+
+# 登録月で、集計
+kokyaku_data["登録年月"] = kokyaku_data["登録日"].dt.strftime("%Y%m")
+rslt = kokyaku_data.groupby("登録年月").count()["顧客名"]
+# print(rslt)
+# print(len(kokyaku_data))
+
+# 登録日に数値データが残っていないか、確認　  .str.isdigit() => 全部数字かどうかを判定している。
+flg_is_serial = kokyaku_data["登録日"].astype("str").str.isdigit()
+flg_is_serial.sum()
+
+##### 18: 顧客名をキーで、２つのデータ結合（ジョイン）
+join_data = pd.merge(uriage_data, kokyaku_data, left_on="customer_name", right_on="顧客名", how="left")
+join_data = join_data.drop("customer_name", axis=1)
+# join_data
+
+##### 19: クレンジングしたデータをダンプする。
+dump_data = join_data[["purchase_date", "purchase_month", "item_name", "item_price", "顧客名", "かな", "地域", "メールアドレス", "登録日"]]
+dump_data
+
+##### 20: データを集計
+import_data = pd.read_csv('dump_data.csv')
+import_data
+
+byItem = import_data.pivot_table(index="purchase_month", columns="item_name", aggfunc="size", fill_value=0)
+byItem
+
+# 売上金額、顧客、地域
+byprice = import_data.pivot_table(index="purchase_month", columns="item_name", values="item_price", aggfunc="sum", fill_value=0)
+byprice
+
+# 購入年月、売上金額の集計 
+byCustomer = import_data.pivot_table(index="purchase_month", columns="顧客名", aggfunc="size", fill_value=0)
+byCustomer
+
+# 購入年月、名顧客の購入数の集計
+byRegion = import_data.pivot_table(index="purchase_month", columns="地域", aggfunc="size", fill_value=0)
+byRegion
+
+# 集計期間で購入していないユーザ
+away_data = pd.merge(uriage_data, kokyaku_data, left_on="customer_name", right_on="顧客名", how="right")
+away_data[away_data["purchase_date"].isnull()][["顧客名", "メールアドレス", "登録日"]]
